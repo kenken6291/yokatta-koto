@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>今週の良かったこと3つだけ日記</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700&family=Noto+Serif+JP:wght@400;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header class="site-header">
+    <div class="header-inner">
+      <div class="logo">
+        <span class="logo-mark">🌿</span>
+        <div class="logo-text">
+          <h1>今週の良かったこと</h1>
+          <p class="logo-sub">3つだけ日記</p>
+        </div>
+      </div>
+      <p class="header-tagline">小さな幸せを、ていねいに。</p>
+    </div>
+  </header>
+
+  <main class="main-layout">
+    <!-- 入力エリア -->
+    <section class="panel input-panel" id="input-section">
+      <div class="panel-header">
+        <h2 id="form-title">今週の良かったことを書く</h2>
+        <p class="panel-sub" id="form-subtitle">3つだけ、ゆっくり思い出してみてください。</p>
+      </div>
+
+      <form id="diary-form" novalidate>
+        <input type="hidden" id="edit-id" value="" />
+
+        <div class="good-item" id="item-1">
+          <div class="item-header">
+            <span class="item-badge">1</span>
+            <label for="good1" class="item-label">1つ目の良かったこと</label>
+          </div>
+          <textarea
+            id="good1"
+            name="good1"
+            placeholder="例：朝のコーヒーがとても美味しかった"
+            rows="3"
+            required
+          ></textarea>
+          <span class="char-count" id="count1">0 / 200</span>
+        </div>
+
+        <div class="good-item" id="item-2">
+          <div class="item-header">
+            <span class="item-badge">2</span>
+            <label for="good2" class="item-label">2つ目の良かったこと</label>
+          </div>
+          <textarea
+            id="good2"
+            name="good2"
+            placeholder="例：友達から久しぶりに連絡がきた"
+            rows="3"
+            required
+          ></textarea>
+          <span class="char-count" id="count2">0 / 200</span>
+        </div>
+
+        <div class="good-item" id="item-3">
+          <div class="item-header">
+            <span class="item-badge">3</span>
+            <label for="good3" class="item-label">3つ目の良かったこと</label>
+          </div>
+          <textarea
+            id="good3"
+            name="good3"
+            placeholder="例：空がきれいだった"
+            rows="3"
+            required
+          ></textarea>
+          <span class="char-count" id="count3">0 / 200</span>
+        </div>
+
+        <div class="form-actions">
+          <button type="submit" class="btn btn-primary" id="submit-btn">
+            <span class="btn-icon">✦</span>
+            <span id="submit-label">保存する</span>
+          </button>
+          <button type="button" class="btn btn-ghost" id="cancel-btn" style="display:none;">
+            キャンセル
+          </button>
+        </div>
+
+        <div id="form-message" class="form-message" role="alert" aria-live="polite"></div>
+      </form>
+    </section>
+
+    <!-- 履歴エリア -->
+    <section class="panel history-panel">
+      <div class="panel-header">
+        <h2>過去の記録</h2>
+        <p class="panel-sub">あなたの小さな幸せの足跡。</p>
+      </div>
+
+      <div id="loading-state" class="state-block">
+        <div class="loading-spinner"></div>
+        <p>読み込み中...</p>
+      </div>
+
+      <div id="empty-state" class="state-block" style="display:none;">
+        <div class="empty-icon">🌱</div>
+        <p class="empty-title">まだ記録がありません</p>
+        <p class="empty-sub">最初の「良かったこと」を書いてみましょう。</p>
+      </div>
+
+      <div id="error-state" class="state-block" style="display:none;">
+        <div class="empty-icon">⚠️</div>
+        <p class="empty-title">データを取得できませんでした</p>
+        <p class="empty-sub" id="error-message">GASのURLが設定されていない可能性があります。</p>
+        <button class="btn btn-ghost" onclick="loadEntries()">再試行する</button>
+      </div>
+
+      <div id="entries-list" class="entries-list" style="display:none;"></div>
+    </section>
+  </main>
+
+  <!-- 削除確認モーダル -->
+  <div class="modal-overlay" id="delete-modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+    <div class="modal-box">
+      <div class="modal-icon">🗑️</div>
+      <h3 id="modal-title">この記録を削除しますか？</h3>
+      <p class="modal-sub">削除した記録は元に戻せません。</p>
+      <div class="modal-actions">
+        <button class="btn btn-ghost" id="modal-cancel">キャンセル</button>
+        <button class="btn btn-danger" id="modal-confirm">削除する</button>
+      </div>
+    </div>
+  </div>
+
+  <footer class="site-footer">
+    <p>あなただけの、平和な空間。✦ 今週の良かったこと3つだけ日記</p>
+  </footer>
+
+  <script src="script.js"></script>
+</body>
+</html>
