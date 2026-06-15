@@ -4,7 +4,7 @@
  * GASのWebアプリURLをここに設定してください。
  * デプロイ後に発行されるURLを下記の GAS_URL に貼り付けます。
  */
-const GAS_URL = "https://script.google.com/macros/library/d/1U8FZ2Pls3bns7Q7RKOphOIYLSIzPsjJhq-_7vrrQ52NWp7ExVhYRvDnR/4";
+const GAS_URL = "https://script.google.com/macros/s/AKfycbwvYfwcOJLXMHeiI803_rWUsyVDgvJJWJViNn0_t7bEBxjZ-vE_YNz3UXlt_t8pa52H/exec";
 // ↑ここを自分のGAS WebアプリURLに書き換えてください
 
 // =============================================
