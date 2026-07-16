@@ -3,7 +3,9 @@
  *
  * スプレッドシート構成:
  *  シート「Users」    : Email, PasswordHash, Salt, Nickname, MustChangePassword, AgreedTerms, CreatedAt, UpdatedAt
- *  シート「Entries」  : Id, Email, EntryDate, Item1, Item1Public, Item2, Item2Public, Item3, Item3Public, CreatedAt
+ *  シート「Entries」  : Id, Email, EntryDate, Item1, Item1Public, Item2, Item2Public, Item3, Item3Public, CreatedAt, UpdatedAt
+ *  シート「Comments」 : Id, EntryId, ParentId, Email, Text, CreatedAt, UpdatedAt  (ParentId空欄=記録への直接コメント/あり=返信)
+ *  シート「Likes」    : Id, TargetType(entry|comment), TargetId, Email, CreatedAt
  *
  * スクリプトプロパティ (PropertiesService) に設定必須:
  *  SPREADSHEET_ID : このアプリ専用のスプレッドシートID
@@ -22,7 +24,7 @@ const SESSION_TTL_SEC = 60 * 60 * 24 * 7; // 7日間
  *
  * これを実行すると:
  *  1. スプレッドシート/メール送信の権限許可画面が表示される(許可する)
- *  2. Users, Entries シートが見出し付きで作成される
+ *  2. Users, Entries, Comments, Likes シートが見出し付きで作成される
  *  3. スクリプトプロパティ(SPREADSHEET_ID / PEPPER)が設定されているか確認する
  * 実行後、実行ログに「OK」と出れば準備完了。その後「デプロイ」に進んでください。
  */
@@ -35,6 +37,8 @@ function setup() {
   }
   getSheet('Users');
   getSheet('Entries');
+  getSheet('Comments');
+  getSheet('Likes');
   Logger.log('OK: シート作成・権限確認が完了しました。ウェブアプリとしてデプロイしてください。');
 }
 
@@ -51,14 +55,20 @@ function doPost(e) {
     switch (action) {
       case 'register': return jsonOut(register(body));
       case 'login': return jsonOut(login(body));
+      case 'requestPasswordReset': return jsonOut(requestPasswordReset(body));
       case 'logout': return jsonOut(logout(body));
       case 'changePassword': return jsonOut(changePassword(body));
       case 'updateProfile': return jsonOut(updateProfile(body));
       case 'createEntry': return jsonOut(createEntry(body));
+      case 'updateEntry': return jsonOut(updateEntry(body));
       case 'getMyEntries': return jsonOut(getMyEntries(body));
       case 'getEntries': return jsonOut(getEntries(body));
-      case 'updateEntrySharing': return jsonOut(updateEntrySharing(body));
       case 'deleteEntry': return jsonOut(deleteEntry(body));
+      case 'addComment': return jsonOut(addComment(body));
+      case 'updateComment': return jsonOut(updateComment(body));
+      case 'deleteComment': return jsonOut(deleteComment(body));
+      case 'getComments': return jsonOut(getComments(body));
+      case 'toggleLike': return jsonOut(toggleLike(body));
       case 'me': return jsonOut(me(body));
       default: return jsonOut({ ok: false, error: '不明なactionです' });
     }
@@ -83,7 +93,11 @@ function getSheet(name) {
     if (name === 'Users') {
       sheet.appendRow(['Email', 'PasswordHash', 'Salt', 'Nickname', 'MustChangePassword', 'AgreedTerms', 'CreatedAt', 'UpdatedAt']);
     } else if (name === 'Entries') {
-      sheet.appendRow(['Id', 'Email', 'EntryDate', 'Item1', 'Item1Public', 'Item2', 'Item2Public', 'Item3', 'Item3Public', 'CreatedAt']);
+      sheet.appendRow(['Id', 'Email', 'EntryDate', 'Item1', 'Item1Public', 'Item2', 'Item2Public', 'Item3', 'Item3Public', 'CreatedAt', 'UpdatedAt']);
+    } else if (name === 'Comments') {
+      sheet.appendRow(['Id', 'EntryId', 'ParentId', 'Email', 'Text', 'CreatedAt', 'UpdatedAt']);
+    } else if (name === 'Likes') {
+      sheet.appendRow(['Id', 'TargetType', 'TargetId', 'Email', 'CreatedAt']);
     }
   }
   return sheet;
@@ -108,6 +122,28 @@ function findUserRow(email) {
   const values = sheet.getDataRange().getValues();
   for (let i = 1; i < values.length; i++) {
     if (String(values[i][0]).toLowerCase() === String(email).toLowerCase()) {
+      return { rowIndex: i + 1, row: values[i], sheet: sheet };
+    }
+  }
+  return null;
+}
+
+function findEntryRow(id) {
+  const sheet = getSheet('Entries');
+  const values = sheet.getDataRange().getValues();
+  for (let i = 1; i < values.length; i++) {
+    if (values[i][0] === id) {
+      return { rowIndex: i + 1, row: values[i], sheet: sheet };
+    }
+  }
+  return null;
+}
+
+function findCommentRow(id) {
+  const sheet = getSheet('Comments');
+  const values = sheet.getDataRange().getValues();
+  for (let i = 1; i < values.length; i++) {
+    if (values[i][0] === id) {
       return { rowIndex: i + 1, row: values[i], sheet: sheet };
     }
   }
@@ -197,6 +233,48 @@ function register(body) {
   return { ok: true, message: '仮パスワードをメールに送信しました' };
 }
 
+function requestPasswordReset(body) {
+  const email = String(body.email || '').trim().toLowerCase();
+  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return { ok: false, error: 'メールアドレスの形式が正しくありません' };
+  }
+
+  const found = findUserRow(email);
+  // メールアドレスの存在有無を外部に漏らさないよう、見つからない場合も同じ成功メッセージを返す
+  if (!found) {
+    return { ok: true, message: 'このメールアドレスが登録されていれば、仮パスワードを送信しました' };
+  }
+
+  const tempPassword = randomToken(10);
+  const salt = randomToken(16);
+  const hash = hashPassword(tempPassword, salt);
+
+  found.sheet.getRange(found.rowIndex, 2).setValue(hash);   // PasswordHash
+  found.sheet.getRange(found.rowIndex, 3).setValue(salt);   // Salt
+  found.sheet.getRange(found.rowIndex, 5).setValue(true);   // MustChangePassword
+  found.sheet.getRange(found.rowIndex, 8).setValue(new Date());
+
+  const nickname = found.row[3];
+
+  try {
+    MailApp.sendEmail({
+      to: email,
+      subject: '【今日の良かったこと】仮パスワード再発行のお知らせ',
+      body:
+        nickname + ' 様\n\n' +
+        'パスワード再発行のリクエストを受け付けました。\n\n' +
+        '仮パスワード: ' + tempPassword + '\n\n' +
+        'ログイン後、新しいパスワードの設定をお願いします。\n\n' +
+        '※このリクエストに心当たりがない場合は、このメールを破棄してください。' +
+        'パスワードは変更されていません。'
+    });
+  } catch (err) {
+    return { ok: false, error: 'メール送信に失敗しました: ' + err.message };
+  }
+
+  return { ok: true, message: 'このメールアドレスが登録されていれば、仮パスワードを送信しました' };
+}
+
 function login(body) {
   const email = String(body.email || '').trim().toLowerCase();
   const password = String(body.password || '');
@@ -278,10 +356,39 @@ function createEntry(body) {
     String(items[0].text).trim(), !!items[0].isPublic,
     String(items[1].text).trim(), !!items[1].isPublic,
     String(items[2].text).trim(), !!items[2].isPublic,
-    now
+    now, now
   ]);
 
   return { ok: true, id: id };
+}
+
+function updateEntry(body) {
+  const found = requireAuth(body);
+  const email = found.row[0];
+  const entryFound = findEntryRow(body.id);
+  if (!entryFound) return { ok: false, error: '記録が見つかりません' };
+  if (String(entryFound.row[1]).toLowerCase() !== email) {
+    return { ok: false, error: '権限がありません' };
+  }
+  const items = body.items || [];
+  if (items.length !== 3) {
+    return { ok: false, error: '3つの項目が必要です' };
+  }
+  for (const it of items) {
+    if (!it.text || !String(it.text).trim()) {
+      return { ok: false, error: '空欄の項目があります' };
+    }
+  }
+  const sheet = entryFound.sheet;
+  const r = entryFound.rowIndex;
+  sheet.getRange(r, 4).setValue(String(items[0].text).trim());
+  sheet.getRange(r, 5).setValue(!!items[0].isPublic);
+  sheet.getRange(r, 6).setValue(String(items[1].text).trim());
+  sheet.getRange(r, 7).setValue(!!items[1].isPublic);
+  sheet.getRange(r, 8).setValue(String(items[2].text).trim());
+  sheet.getRange(r, 9).setValue(!!items[2].isPublic);
+  sheet.getRange(r, 11).setValue(new Date()); // UpdatedAt
+  return { ok: true };
 }
 
 function rowToMyEntry(row) {
@@ -293,8 +400,94 @@ function rowToMyEntry(row) {
       { text: row[5], isPublic: !!row[6] },
       { text: row[7], isPublic: !!row[8] }
     ],
-    createdAt: row[9]
+    createdAt: row[9],
+    updatedAt: row[10]
   };
+}
+
+function nicknameOf(email) {
+  const found = findUserRow(email);
+  return found ? found.row[3] : '(退会済み)';
+}
+
+/* ---------------- いいね ---------------- */
+
+function getLikeInfo(targetType, targetIds, myEmail) {
+  const map = {};
+  targetIds.forEach(id => { map[id] = { count: 0, likedByMe: false }; });
+  const rows = getSheet('Likes').getDataRange().getValues();
+  for (let i = 1; i < rows.length; i++) {
+    const r = rows[i];
+    if (r[1] === targetType && map.hasOwnProperty(r[2])) {
+      map[r[2]].count++;
+      if (String(r[3]).toLowerCase() === myEmail) map[r[2]].likedByMe = true;
+    }
+  }
+  return map;
+}
+
+function removeLikesForTargets(targetType, targetIds) {
+  if (!targetIds.length) return;
+  const sheet = getSheet('Likes');
+  const values = sheet.getDataRange().getValues();
+  for (let i = values.length - 1; i >= 1; i--) {
+    if (values[i][1] === targetType && targetIds.indexOf(values[i][2]) !== -1) {
+      sheet.deleteRow(i + 1);
+    }
+  }
+}
+
+function entryVisibleToViewer(entryRow, viewerEmail) {
+  const email = String(entryRow[1]).toLowerCase();
+  if (email === viewerEmail) return true;
+  return !!entryRow[4] || !!entryRow[6] || !!entryRow[8];
+}
+
+function toggleLike(body) {
+  const found = requireAuth(body);
+  const email = found.row[0];
+  const targetType = body.targetType;
+  const targetId = body.targetId;
+  if (targetType !== 'entry' && targetType !== 'comment') {
+    return { ok: false, error: '不正な対象です' };
+  }
+
+  if (targetType === 'entry') {
+    const entryFound = findEntryRow(targetId);
+    if (!entryFound) return { ok: false, error: '記録が見つかりません' };
+    if (!entryVisibleToViewer(entryFound.row, email)) return { ok: false, error: 'この記録にはいいねできません' };
+  } else {
+    const commentFound = findCommentRow(targetId);
+    if (!commentFound) return { ok: false, error: 'コメントが見つかりません' };
+    const entryFound = findEntryRow(commentFound.row[1]);
+    if (!entryFound || !entryVisibleToViewer(entryFound.row, email)) {
+      return { ok: false, error: 'いいねできません' };
+    }
+  }
+
+  const sheet = getSheet('Likes');
+  const values = sheet.getDataRange().getValues();
+  for (let i = 1; i < values.length; i++) {
+    if (values[i][1] === targetType && values[i][2] === targetId && String(values[i][3]).toLowerCase() === email) {
+      sheet.deleteRow(i + 1);
+      return { ok: true, liked: false };
+    }
+  }
+  sheet.appendRow([Utilities.getUuid(), targetType, targetId, email, new Date()]);
+  return { ok: true, liked: true };
+}
+
+/* ---------------- 記録の一覧取得 ---------------- */
+
+function getCommentCounts(entryIds) {
+  const map = {};
+  entryIds.forEach(id => { map[id] = 0; });
+  const rows = getSheet('Comments').getDataRange().getValues();
+  for (let i = 1; i < rows.length; i++) {
+    const eid = String(rows[i][1]);
+    if (map.hasOwnProperty(eid)) map[eid]++;
+  }
+  return map;
 }
 
 function getMyEntries(body) {
@@ -302,12 +495,17 @@ function getMyEntries(body) {
   const email = found.row[0];
   const rows = entriesData().filter(r => String(r[1]).toLowerCase() === email);
   rows.sort((a, b) => new Date(b[9]) - new Date(a[9]));
-  return { ok: true, entries: rows.map(rowToMyEntry) };
-}
-
-function nicknameOf(email) {
-  const found = findUserRow(email);
-  return found ? found.row[3] : '(退会済み)';
+  const entries = rows.map(rowToMyEntry);
+  const ids = entries.map(e => e.id);
+  const likeMap = getLikeInfo('entry', ids, email);
+  const commentCounts = getCommentCounts(ids);
+  entries.forEach(e => {
+    const li = likeMap[e.id] || { count: 0, likedByMe: false };
+    e.likeCount = li.count;
+    e.likedByMe = li.likedByMe;
+    e.commentCount = commentCounts[e.id] || 0;
+  });
+  return { ok: true, entries: entries };
 }
 
 // 他会員の公開項目 + 自分の全項目を、指定モードで返す
@@ -337,7 +535,8 @@ function getEntries(body) {
       nickname: isOwn ? found.row[3] : nicknameOf(email),
       entryDate: row[2],
       items: visibleItems,
-      createdAt: row[9]
+      createdAt: row[9],
+      updatedAt: row[10]
     });
   });
 
@@ -350,27 +549,32 @@ function getEntries(body) {
     feed.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
   }
 
-  return { ok: true, entries: feed.slice(0, limit) };
+  const page = feed.slice(0, limit);
+  const ids = page.map(e => e.id);
+  const likeMap = getLikeInfo('entry', ids, myEmail);
+  const commentCounts = getCommentCounts(ids);
+  page.forEach(e => {
+    const li = likeMap[e.id] || { count: 0, likedByMe: false };
+    e.likeCount = li.count;
+    e.likedByMe = li.likedByMe;
+    e.commentCount = commentCounts[e.id] || 0;
+  });
+
+  return { ok: true, entries: page };
 }
 
-function updateEntrySharing(body) {
-  const found = requireAuth(body);
-  const email = found.row[0];
-  const id = body.id;
-  const sheet = getSheet('Entries');
-  const values = sheet.getDataRange().getValues();
-  for (let i = 1; i < values.length; i++) {
-    if (values[i][0] === id) {
-      if (String(values[i][1]).toLowerCase() !== email) {
-        return { ok: false, error: '権限がありません' };
-      }
-      sheet.getRange(i + 1, 5).setValue(!!body.item1Public);
-      sheet.getRange(i + 1, 7).setValue(!!body.item2Public);
-      sheet.getRange(i + 1, 9).setValue(!!body.item3Public);
-      return { ok: true };
+function cascadeDeleteEntryRelated(entryId) {
+  const cSheet = getSheet('Comments');
+  const cValues = cSheet.getDataRange().getValues();
+  const commentIds = [];
+  for (let i = cValues.length - 1; i >= 1; i--) {
+    if (String(cValues[i][1]) === entryId) {
+      commentIds.push(cValues[i][0]);
+      cSheet.deleteRow(i + 1);
     }
   }
-  return { ok: false, error: '記録が見つかりません' };
+  removeLikesForTargets('entry', [entryId]);
+  if (commentIds.length) removeLikesForTargets('comment', commentIds);
 }
 
 function deleteEntry(body) {
@@ -385,8 +589,116 @@ function deleteEntry(body) {
         return { ok: false, error: '権限がありません' };
       }
       sheet.deleteRow(i + 1);
+      cascadeDeleteEntryRelated(id);
       return { ok: true };
     }
   }
   return { ok: false, error: '記録が見つかりません' };
+}
+
+/* ---------------- コメント / 返信 ---------------- */
+
+function addComment(body) {
+  const found = requireAuth(body);
+  const email = found.row[0];
+  const entryId = body.entryId;
+  const text = String(body.text || '').trim();
+  const parentId = body.parentId ? String(body.parentId) : '';
+
+  if (!text) return { ok: false, error: 'コメントを入力してください' };
+  if (text.length > 500) return { ok: false, error: 'コメントは500文字以内にしてください' };
+
+  const entryFound = findEntryRow(entryId);
+  if (!entryFound) return { ok: false, error: '記録が見つかりません' };
+  if (!entryVisibleToViewer(entryFound.row, email)) return { ok: false, error: 'この記録にはコメントできません' };
+
+  if (parentId) {
+    const parentFound = findCommentRow(parentId);
+    if (!parentFound) return { ok: false, error: '返信先のコメントが見つかりません' };
+  }
+
+  const id = Utilities.getUuid();
+  const now = new Date();
+  getSheet('Comments').appendRow([id, entryId, parentId, email, text, now, now]);
+  return { ok: true, id: id };
+}
+
+function updateComment(body) {
+  const found = requireAuth(body);
+  const email = found.row[0];
+  const commentFound = findCommentRow(body.id);
+  if (!commentFound) return { ok: false, error: 'コメントが見つかりません' };
+  if (String(commentFound.row[3]).toLowerCase() !== email) return { ok: false, error: '権限がありません' };
+
+  const text = String(body.text || '').trim();
+  if (!text) return { ok: false, error: 'コメントを入力してください' };
+  if (text.length > 500) return { ok: false, error: 'コメントは500文字以内にしてください' };
+
+  commentFound.sheet.getRange(commentFound.rowIndex, 5).setValue(text);
+  commentFound.sheet.getRange(commentFound.rowIndex, 7).setValue(new Date());
+  return { ok: true };
+}
+
+function deleteComment(body) {
+  const found = requireAuth(body);
+  const email = found.row[0];
+  const commentFound = findCommentRow(body.id);
+  if (!commentFound) return { ok: false, error: 'コメントが見つかりません' };
+  if (String(commentFound.row[3]).toLowerCase() !== email) return { ok: false, error: '権限がありません' };
+
+  const sheet = getSheet('Comments');
+  const values = sheet.getDataRange().getValues();
+  const idsToDelete = [body.id];
+  for (let i = 1; i < values.length; i++) {
+    if (String(values[i][2]) === body.id) idsToDelete.push(values[i][0]);
+  }
+  for (let i = values.length - 1; i >= 1; i--) {
+    if (idsToDelete.indexOf(values[i][0]) !== -1) {
+      sheet.deleteRow(i + 1);
+    }
+  }
+  removeLikesForTargets('comment', idsToDelete);
+  return { ok: true };
+}
+
+function getComments(body) {
+  const found = requireAuth(body);
+  const myEmail = found.row[0];
+  const entryId = body.entryId;
+
+  const entryFound = findEntryRow(entryId);
+  if (!entryFound) return { ok: false, error: '記録が見つかりません' };
+  if (!entryVisibleToViewer(entryFound.row, myEmail)) return { ok: false, error: 'この記録は閲覧できません' };
+
+  const rows = getSheet('Comments').getDataRange().getValues();
+  rows.shift();
+  const all = rows.filter(r => String(r[1]) === entryId).map(r => {
+    const email = String(r[3]).toLowerCase();
+    return {
+      id: r[0], entryId: r[1], parentId: r[2] || null,
+      email: email,
+      nickname: nicknameOf(email),
+      text: r[4], createdAt: r[5], updatedAt: r[6],
+      isOwn: email === myEmail
+    };
+  });
+
+  const likeMap = getLikeInfo('comment', all.map(c => c.id), myEmail);
+  all.forEach(c => {
+    const li = likeMap[c.id] || { count: 0, likedByMe: false };
+    c.likeCount = li.count;
+    c.likedByMe = li.likedByMe;
+  });
+
+  const top = all.filter(c => !c.parentId).sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+  const repliesMap = {};
+  all.filter(c => c.parentId).forEach(c => {
+    if (!repliesMap[c.parentId]) repliesMap[c.parentId] = [];
+    repliesMap[c.parentId].push(c);
+  });
+  top.forEach(c => {
+    c.replies = (repliesMap[c.id] || []).sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+  });
+
+  return { ok: true, comments: top };
 }

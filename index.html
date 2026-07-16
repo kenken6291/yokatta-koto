@@ -136,6 +136,34 @@
   .userbar .actions{display:flex; gap:10px;}
 
   .loading{text-align:center; color:var(--sub); font-size:12.5px; padding:20px;}
+
+  .reactions{display:flex; gap:16px; margin-top:10px; padding-top:10px; border-top:1px solid var(--line);}
+  .reactions button{background:none;border:none;font-size:12.5px;color:var(--sub);cursor:pointer;display:inline-flex;align-items:center;gap:4px;padding:2px 4px;}
+  .reactions button.liked{color:var(--danger); font-weight:600;}
+  .reactions button:hover{color:var(--leaf-dark);}
+
+  .edit-form{padding-top:2px;}
+  .edit-item{margin-bottom:12px;}
+  .edit-item .share-toggle{margin-top:4px;}
+
+  .comments-area{margin-top:12px; padding-top:12px; border-top:1px dashed var(--line);}
+  .comment-list{margin-bottom:10px;}
+  .comment{padding:9px 0; border-bottom:1px solid var(--line);}
+  .comment:last-child{border-bottom:none;}
+  .c-head{display:flex; justify-content:space-between; align-items:baseline; font-size:12px; gap:8px;}
+  .c-head .c-name{font-weight:700; color:var(--leaf-dark); white-space:nowrap;}
+  .c-head .c-date{color:var(--sub); font-size:10.5px; white-space:nowrap;}
+  .c-text{font-size:13px; margin:4px 0; white-space:pre-wrap; word-break:break-word;}
+  .c-actions{display:flex; gap:12px;}
+  .c-actions button{background:none;border:none;font-size:11px;color:var(--sub);cursor:pointer; padding:2px 0;}
+  .c-actions button.liked{color:var(--danger); font-weight:600;}
+  .c-actions button:hover{color:var(--leaf-dark);}
+  .c-replies{margin-left:16px; margin-top:6px; border-left:2px solid var(--leaf-pale); padding-left:10px;}
+  .c-reply-form, .c-edit-form{margin-top:8px;}
+  .c-reply-form textarea, .c-edit-form textarea, .comment-form textarea{min-height:44px; font-size:13px;}
+  .comment-form{display:flex; flex-direction:column; gap:6px; margin-top:4px;}
+  .comment-form button, .c-reply-form button, .c-edit-form .row-btns{align-self:flex-end;}
+  .empty-comments{font-size:12px; color:var(--sub); padding:8px 0;}
 </style>
 </head>
 <body>
@@ -165,7 +193,23 @@
       <button class="btn" id="btnLogin">ログイン</button>
       <p class="msg err hidden" id="loginMsg"></p>
       <p style="text-align:center; margin-top:14px;">
+        <button class="link-btn" id="showReset">パスワードを忘れた場合</button>
+      </p>
+      <p style="text-align:center; margin-top:8px;">
         <button class="link-btn" id="showRegister">はじめての方はこちら(会員登録)</button>
+      </p>
+    </div>
+
+    <div class="card hidden" id="resetCard">
+      <h2>パスワード再発行</h2>
+      <p class="desc">登録済みのメールアドレスに、新しい仮パスワードを送信します。</p>
+      <label class="field-label">メールアドレス</label>
+      <input type="email" id="resetEmail" autocomplete="email">
+      <div style="height:14px"></div>
+      <button class="btn" id="btnReset">仮パスワードを再発行する</button>
+      <p class="msg hidden" id="resetMsg"></p>
+      <p style="text-align:center; margin-top:14px;">
+        <button class="link-btn" id="backToLoginFromReset">ログイン画面にもどる</button>
       </p>
     </div>
 
@@ -381,6 +425,24 @@ $('showLogin').addEventListener('click', ()=>{
   $('loginCard').classList.remove('hidden');
 });
 
+/* ---------- パスワード再発行 ---------- */
+$('showReset').addEventListener('click', ()=>{
+  $('loginCard').classList.add('hidden');
+  $('resetCard').classList.remove('hidden');
+});
+$('backToLoginFromReset').addEventListener('click', ()=>{
+  $('resetCard').classList.add('hidden');
+  $('loginCard').classList.remove('hidden');
+});
+$('btnReset').addEventListener('click', async ()=>{
+  const email = $('resetEmail').value.trim();
+  const msg = $('resetMsg');
+  if (!email){ showMsg(msg, 'メールアドレスを入力してください', true); return; }
+  const r = await api('requestPasswordReset', { email });
+  if (!r.ok){ showMsg(msg, r.error, true); return; }
+  showMsg(msg, r.message, false);
+});
+
 /* ---------- 会員登録 ---------- */
 $('btnRegister').addEventListener('click', async ()=>{
   const email = $('regEmail').value.trim();
@@ -513,29 +575,250 @@ async function loadFeed(){
 
   area.innerHTML = '';
   entries.forEach(e=>{
-    const div = document.createElement('div');
-    div.className = 'entry';
-    const itemsHtml = e.items.map(it => '<li><span class="bullet">・</span><span>'+escapeHtml(it.text)+'</span></li>').join('');
-    div.innerHTML =
-      '<div class="meta">' +
-        '<span class="nickname">'+escapeHtml(e.nickname)+(e.isOwn?'<span class="own-tag">自分</span>':'')+'</span>' +
-        '<span class="date">'+fmtDate(e.entryDate)+'</span>' +
-      '</div>' +
-      '<ul>'+itemsHtml+'</ul>' +
-      (e.isOwn ? '<div class="foot"><button class="del-btn">削除</button></div>' : '');
-    if (e.isOwn){
-      div.querySelector('.del-btn').addEventListener('click', async ()=>{
-        if (!confirm('この記録を削除しますか？削除すると元に戻せません。')) return;
-        const r = await api('deleteEntry', { id: e.id });
-        if (r.ok) loadFeed();
-      });
-    }
-    area.appendChild(div);
+    area.appendChild(buildEntryCard(e));
   });
 }
 
 function escapeHtml(s){
   return String(s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+/* ========== 投稿カード(表示・編集・いいね・コメント) ========== */
+
+function buildEntryCard(e){
+  const div = document.createElement('div');
+  div.className = 'entry';
+  div.dataset.id = e.id;
+  renderEntryView(div, e);
+  return div;
+}
+
+function renderEntryView(div, e){
+  const itemsHtml = e.items.map(it => '<li><span class="bullet">・</span><span>'+escapeHtml(it.text)+'</span></li>').join('');
+  const edited = e.updatedAt && e.createdAt && (new Date(e.updatedAt).getTime() !== new Date(e.createdAt).getTime());
+  div.innerHTML =
+    '<div class="meta">' +
+      '<span class="nickname">'+escapeHtml(e.nickname)+(e.isOwn?'<span class="own-tag">自分</span>':'')+'</span>' +
+      '<span class="date">'+fmtDate(e.entryDate)+(edited?'(編集済み)':'')+'</span>' +
+    '</div>' +
+    '<ul>'+itemsHtml+'</ul>' +
+    '<div class="reactions">' +
+      '<button class="like-btn'+(e.likedByMe?' liked':'')+'">'+(e.likedByMe?'❤️':'🤍')+' いいね <span class="like-count">'+(e.likeCount||0)+'</span></button>' +
+      '<button class="comment-toggle">💬 コメント <span class="comment-count">'+(e.commentCount||0)+'</span></button>' +
+    '</div>' +
+    (e.isOwn ? '<div class="foot"><button class="edit-btn">修正</button><button class="del-btn">削除</button></div>' : '') +
+    '<div class="comments-area hidden"></div>';
+
+  div.querySelector('.like-btn').addEventListener('click', async function(){
+    const r = await api('toggleLike', { targetType:'entry', targetId: e.id });
+    if (!r.ok) return;
+    e.likedByMe = r.liked;
+    e.likeCount = (e.likeCount||0) + (r.liked ? 1 : -1);
+    this.classList.toggle('liked', e.likedByMe);
+    this.innerHTML = (e.likedByMe?'❤️':'🤍') + ' いいね <span class="like-count">'+e.likeCount+'</span>';
+  });
+
+  div.querySelector('.comment-toggle').addEventListener('click', ()=> toggleComments(div, e));
+
+  if (e.isOwn){
+    div.querySelector('.edit-btn').addEventListener('click', ()=> renderEntryEditForm(div, e));
+    div.querySelector('.del-btn').addEventListener('click', async ()=>{
+      if (!confirm('この記録を削除しますか？削除すると元に戻せません。コメントやいいねも削除されます。')) return;
+      const r = await api('deleteEntry', { id: e.id });
+      if (r.ok) div.remove();
+    });
+  }
+}
+
+function renderEntryEditForm(div, e){
+  div.innerHTML =
+    '<div class="edit-form">' +
+    e.items.map((it,idx)=>
+      '<div class="edit-item">' +
+        '<label class="field-label">'+(idx+1)+'つ目の良かったこと</label>' +
+        '<textarea class="edit-text" data-idx="'+idx+'" maxlength="200">'+escapeHtml(it.text)+'</textarea>' +
+        '<label class="share-toggle'+(it.isPublic?' on':'')+'"><input type="checkbox" class="edit-pub" data-idx="'+idx+'" '+(it.isPublic?'checked':'')+'> 他の会員に公開する</label>' +
+      '</div>'
+    ).join('') +
+    '<div class="row-btns">' +
+      '<button class="btn secondary small edit-cancel">キャンセル</button>' +
+      '<button class="btn small edit-save">保存する</button>' +
+    '</div>' +
+    '<p class="msg err hidden edit-msg"></p>' +
+    '</div>';
+
+  div.querySelectorAll('.share-toggle input').forEach(cb=>{
+    cb.addEventListener('change', ()=> cb.closest('.share-toggle').classList.toggle('on', cb.checked));
+  });
+  div.querySelector('.edit-cancel').addEventListener('click', ()=> renderEntryView(div, e));
+  div.querySelector('.edit-save').addEventListener('click', async ()=>{
+    const texts = div.querySelectorAll('.edit-text');
+    const pubs = div.querySelectorAll('.edit-pub');
+    const items = Array.from(texts).map((ta,i)=>({ text: ta.value.trim(), isPublic: pubs[i].checked }));
+    const msg = div.querySelector('.edit-msg');
+    if (items.some(it=>!it.text)){ showMsg(msg,'3つとも入力してください', true); return; }
+    const r = await api('updateEntry', { id: e.id, items });
+    if (!r.ok){ showMsg(msg, r.error, true); return; }
+    e.items = items;
+    e.updatedAt = new Date().toISOString();
+    renderEntryView(div, e);
+  });
+}
+
+/* ========== コメント・返信 ========== */
+
+async function toggleComments(div, e){
+  const area = div.querySelector('.comments-area');
+  if (!area.classList.contains('hidden')){
+    area.classList.add('hidden');
+    return;
+  }
+  area.classList.remove('hidden');
+  area.innerHTML = '<div class="loading">読み込み中...</div>';
+  const r = await api('getComments', { entryId: e.id });
+  if (!r.ok){ area.innerHTML = '<p class="empty-comments">読み込みに失敗しました</p>'; return; }
+  renderComments(div, area, e, r.comments);
+}
+
+function bumpCommentCount(entryDiv, delta){
+  const el = entryDiv.querySelector('.comment-count');
+  if (!el) return;
+  el.textContent = Math.max(0, (parseInt(el.textContent||'0',10) + delta));
+}
+
+function renderComments(entryDiv, area, e, comments){
+  const list = document.createElement('div');
+  list.className = 'comment-list';
+  if (comments.length === 0){
+    list.innerHTML = '<p class="empty-comments">まだコメントがありません</p>';
+  } else {
+    comments.forEach(c => list.appendChild(buildCommentNode(entryDiv, e, c, false)));
+  }
+
+  const form = document.createElement('div');
+  form.className = 'comment-form';
+  form.innerHTML = '<textarea maxlength="500" placeholder="コメントを書く"></textarea><button class="btn secondary small">投稿</button>';
+  form.querySelector('button').addEventListener('click', async ()=>{
+    const ta = form.querySelector('textarea');
+    const text = ta.value.trim();
+    if (!text) return;
+    const r = await api('addComment', { entryId: e.id, text });
+    if (!r.ok) return;
+    ta.value = '';
+    bumpCommentCount(entryDiv, 1);
+    const rr = await api('getComments', { entryId: e.id });
+    if (rr.ok) renderComments(entryDiv, area, e, rr.comments);
+  });
+
+  area.innerHTML = '';
+  area.appendChild(list);
+  area.appendChild(form);
+}
+
+function buildCommentNode(entryDiv, e, c, isReply){
+  const wrap = document.createElement('div');
+  wrap.className = 'comment';
+  renderCommentView(entryDiv, e, wrap, c, isReply);
+  return wrap;
+}
+
+function renderCommentView(entryDiv, e, wrap, c, isReply){
+  const edited = c.updatedAt && c.createdAt && (new Date(c.updatedAt).getTime() !== new Date(c.createdAt).getTime());
+  wrap.innerHTML =
+    '<div class="c-head">' +
+      '<span class="c-name">'+escapeHtml(c.nickname)+(c.isOwn?'<span class="own-tag">自分</span>':'')+'</span>' +
+      '<span class="c-date">'+fmtDate(c.createdAt)+(edited?'(編集済み)':'')+'</span>' +
+    '</div>' +
+    '<div class="c-text">'+escapeHtml(c.text)+'</div>' +
+    '<div class="c-actions">' +
+      '<button class="c-like'+(c.likedByMe?' liked':'')+'">'+(c.likedByMe?'❤️':'🤍')+' <span class="c-like-count">'+(c.likeCount||0)+'</span></button>' +
+      (isReply ? '' : '<button class="c-reply-toggle">返信</button>') +
+      (c.isOwn ? '<button class="c-edit">修正</button><button class="c-del">削除</button>' : '') +
+    '</div>' +
+    (isReply ? '' : '<div class="c-reply-form hidden"></div>') +
+    (isReply ? '' : '<div class="c-replies"></div>');
+
+  wrap.querySelector('.c-like').addEventListener('click', async function(){
+    const r = await api('toggleLike', { targetType:'comment', targetId: c.id });
+    if (!r.ok) return;
+    c.likedByMe = r.liked;
+    c.likeCount = (c.likeCount||0) + (r.liked ? 1 : -1);
+    this.classList.toggle('liked', c.likedByMe);
+    this.innerHTML = (c.likedByMe?'❤️':'🤍')+' <span class="c-like-count">'+c.likeCount+'</span>';
+  });
+
+  if (!isReply){
+    wrap.querySelector('.c-reply-toggle').addEventListener('click', ()=>{
+      const rf = wrap.querySelector('.c-reply-form');
+      if (!rf.classList.contains('hidden')){ rf.classList.add('hidden'); return; }
+      rf.classList.remove('hidden');
+      rf.innerHTML = '<textarea maxlength="500" placeholder="返信を書く"></textarea><button class="btn secondary small">返信する</button>';
+      rf.querySelector('button').addEventListener('click', async ()=>{
+        const ta = rf.querySelector('textarea');
+        const text = ta.value.trim();
+        if (!text) return;
+        const r = await api('addComment', { entryId: e.id, text, parentId: c.id });
+        if (!r.ok) return;
+        rf.classList.add('hidden');
+        bumpCommentCount(entryDiv, 1);
+        const rr = await api('getComments', { entryId: e.id });
+        if (rr.ok){
+          const updated = rr.comments.find(x=>x.id===c.id);
+          if (updated){
+            c.replies = updated.replies;
+            renderReplies(entryDiv, e, wrap, c);
+          }
+        }
+      });
+    });
+  }
+
+  if (c.isOwn){
+    wrap.querySelector('.c-edit').addEventListener('click', ()=> renderCommentEditForm(entryDiv, e, wrap, c, isReply));
+    wrap.querySelector('.c-del').addEventListener('click', async ()=>{
+      const isTop = !isReply;
+      const replyCount = isTop ? (c.replies||[]).length : 0;
+      const warn = replyCount>0 ? 'このコメントを削除しますか？返信も一緒に削除されます。' : 'このコメントを削除しますか？削除すると元に戻せません。';
+      if (!confirm(warn)) return;
+      const r = await api('deleteComment', { id: c.id });
+      if (!r.ok) return;
+      bumpCommentCount(entryDiv, -(1 + replyCount));
+      wrap.remove();
+    });
+  }
+
+  if (!isReply){
+    renderReplies(entryDiv, e, wrap, c);
+  }
+}
+
+function renderReplies(entryDiv, e, wrap, c){
+  const repliesEl = wrap.querySelector('.c-replies');
+  repliesEl.innerHTML = '';
+  (c.replies||[]).forEach(rep => repliesEl.appendChild(buildCommentNode(entryDiv, e, rep, true)));
+}
+
+function renderCommentEditForm(entryDiv, e, wrap, c, isReply){
+  wrap.innerHTML =
+    '<div class="c-edit-form">' +
+    '<textarea maxlength="500">'+escapeHtml(c.text)+'</textarea>' +
+    '<div class="row-btns">' +
+      '<button class="btn secondary small c-edit-cancel">キャンセル</button>' +
+      '<button class="btn small c-edit-save">保存</button>' +
+    '</div>' +
+    '<p class="msg err hidden c-edit-msg"></p>' +
+    '</div>';
+  wrap.querySelector('.c-edit-cancel').addEventListener('click', ()=> renderCommentView(entryDiv, e, wrap, c, isReply));
+  wrap.querySelector('.c-edit-save').addEventListener('click', async ()=>{
+    const text = wrap.querySelector('textarea').value.trim();
+    const msg = wrap.querySelector('.c-edit-msg');
+    if (!text){ showMsg(msg, 'コメントを入力してください', true); return; }
+    const r = await api('updateComment', { id: c.id, text });
+    if (!r.ok){ showMsg(msg, r.error, true); return; }
+    c.text = text;
+    c.updatedAt = new Date().toISOString();
+    renderCommentView(entryDiv, e, wrap, c, isReply);
+  });
 }
 
 /* ---------- 起動時 ---------- */
