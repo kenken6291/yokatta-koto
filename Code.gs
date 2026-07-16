@@ -16,6 +16,28 @@ const SS_ID = PropertiesService.getScriptProperties().getProperty('SPREADSHEET_I
 const PEPPER = PropertiesService.getScriptProperties().getProperty('PEPPER');
 const SESSION_TTL_SEC = 60 * 60 * 24 * 7; // 7日間
 
+/**
+ * ★最初に1回だけ、このプロジェクトを開いて手動で実行する関数★
+ * (Apps Scriptエディタ上部の関数選択で setup を選び、▷実行 をクリック)
+ *
+ * これを実行すると:
+ *  1. スプレッドシート/メール送信の権限許可画面が表示される(許可する)
+ *  2. Users, Entries シートが見出し付きで作成される
+ *  3. スクリプトプロパティ(SPREADSHEET_ID / PEPPER)が設定されているか確認する
+ * 実行後、実行ログに「OK」と出れば準備完了。その後「デプロイ」に進んでください。
+ */
+function setup() {
+  if (!SS_ID) {
+    throw new Error('スクリプトプロパティ SPREADSHEET_ID が未設定です。歯車アイコン→スクリプトプロパティで設定してください。');
+  }
+  if (!PEPPER) {
+    throw new Error('スクリプトプロパティ PEPPER が未設定です。歯車アイコン→スクリプトプロパティで設定してください。');
+  }
+  getSheet('Users');
+  getSheet('Entries');
+  Logger.log('OK: シート作成・権限確認が完了しました。ウェブアプリとしてデプロイしてください。');
+}
+
 function doPost(e) {
   let body;
   try {
