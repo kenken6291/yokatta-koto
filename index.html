@@ -553,10 +553,34 @@ document.querySelectorAll('.share-toggle input').forEach(cb=>{
 /* ---------- 音声入力(共通) ---------- */
 let recognition = null;
 let voiceActive = false;
+let wakeLock = null;
+let voiceSafetyTimer = null;
 
 function getSpeechRecognitionCtor(){
   return window.SpeechRecognition || window.webkitSpeechRecognition || null;
 }
+
+async function requestWakeLock(){
+  try {
+    if ('wakeLock' in navigator) {
+      wakeLock = await navigator.wakeLock.request('screen');
+    }
+  } catch (err) { /* 対応していない機種・状況では何もしない */ }
+}
+
+function releaseWakeLock(){
+  if (wakeLock) {
+    wakeLock.release().catch(()=>{});
+    wakeLock = null;
+  }
+}
+
+// 画面が非表示(スリープ・ロック・タブ切替)になったら、フリーズを防ぐため録音を打ち切る
+document.addEventListener('visibilitychange', ()=>{
+  if (document.hidden && voiceActive && recognition){
+    recognition.stop();
+  }
+});
 
 function toggleVoiceInput(textareaEl, btnEl, previewEl){
   if (voiceActive){
@@ -577,10 +601,13 @@ function toggleVoiceInput(textareaEl, btnEl, previewEl){
 
   recognition.onstart = ()=>{
     voiceActive = true;
+    requestWakeLock();
     btnEl.classList.add('recording');
     btnEl.textContent = '🛑 停止（話し終えたらタップ）';
     previewEl.classList.remove('hidden');
     previewEl.textContent = '聞き取り中...';
+    // 万一止まらなくなった場合の保険(30秒で自動終了)
+    voiceSafetyTimer = setTimeout(()=>{ if (recognition) recognition.stop(); }, 30000);
   };
   recognition.onresult = (ev)=>{
     let text = '';
@@ -589,10 +616,14 @@ function toggleVoiceInput(textareaEl, btnEl, previewEl){
     previewEl.textContent = text;
   };
   recognition.onerror = ()=>{
+    clearTimeout(voiceSafetyTimer);
+    releaseWakeLock();
     stopVoiceUI(btnEl, previewEl);
     voiceActive = false;
   };
   recognition.onend = async ()=>{
+    clearTimeout(voiceSafetyTimer);
+    releaseWakeLock();
     stopVoiceUI(btnEl, previewEl);
     voiceActive = false;
     const spoken = liveText.trim();
