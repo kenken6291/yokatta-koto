@@ -10,12 +10,14 @@
  * スクリプトプロパティ (PropertiesService) に設定必須:
  *  SPREADSHEET_ID : このアプリ専用のスプレッドシートID
  *  PEPPER         : パスワードハッシュ用の秘密文字列(自分で決めた長いランダム文字列)
+ *  GEMINI_API_KEY : 音声入力の文章整形(formatVoiceText)に使うGemini APIキー
  *
  * デプロイ: 「ウェブアプリとして新しいバージョンをデプロイ」を忘れずに。
  */
 
 const SS_ID = PropertiesService.getScriptProperties().getProperty('SPREADSHEET_ID');
 const PEPPER = PropertiesService.getScriptProperties().getProperty('PEPPER');
+const GEMINI_API_KEY = PropertiesService.getScriptProperties().getProperty('GEMINI_API_KEY');
 const SESSION_TTL_SEC = 60 * 60 * 24 * 7; // 7日間
 
 /**
@@ -69,6 +71,7 @@ function doPost(e) {
       case 'deleteComment': return jsonOut(deleteComment(body));
       case 'getComments': return jsonOut(getComments(body));
       case 'toggleLike': return jsonOut(toggleLike(body));
+      case 'formatVoiceText': return jsonOut(formatVoiceText(body));
       case 'me': return jsonOut(me(body));
       default: return jsonOut({ ok: false, error: '不明なactionです' });
     }
@@ -701,4 +704,56 @@ function getComments(body) {
   });
 
   return { ok: true, comments: top };
+}
+
+/* ---------------- 音声入力の文章整形(Gemini) ---------------- */
+
+function callGemini(payload, model) {
+  if (!GEMINI_API_KEY) throw new Error('スクリプトプロパティ GEMINI_API_KEY が未設定です');
+  const url = 'https://generativelanguage.googleapis.com/v1beta/models/' +
+    (model || 'gemini-2.0-flash') + ':generateContent?key=' + GEMINI_API_KEY;
+  const res = UrlFetchApp.fetch(url, {
+    method: 'post',
+    contentType: 'application/json',
+    payload: JSON.stringify(payload),
+    muteHttpExceptions: true
+  });
+  if (res.getResponseCode() !== 200) {
+    throw new Error('Gemini API error ' + res.getResponseCode() + ': ' + res.getContentText().slice(0, 300));
+  }
+  const data = JSON.parse(res.getContentText());
+  const parts = (((data.candidates || [])[0] || {}).content || {}).parts || [];
+  return parts.map(p => p.text || '').join('');
+}
+
+// 音声認識でそのまま書き起こされたテキストを、シンプルで自然な一文に整える
+function formatVoiceText(body) {
+  requireAuth(body); // ログイン済みユーザーのみ利用可能
+
+  const text = String(body.text || '').trim();
+  if (!text) return { ok: false, error: 'テキストが空です' };
+  if (text.length > 1000) return { ok: false, error: '文章が長すぎます' };
+
+  const prompt =
+    '以下は、その日にあった「良かったこと」を音声入力でそのまま書き起こしたテキストです。\n' +
+    '意味を変えずに、「えーと」「あの」などの言い淀みや言い間違い、重複を取り除き、\n' +
+    '飾らない自然な話し言葉のまま、シンプルで読みやすい一文〜数文に整えてください。\n' +
+    '絵文字や記号、過度に丁寧・大げさな表現は使わないでください。\n' +
+    '200文字以内にまとめ、整形後の文章だけを出力してください（説明や前置きは不要です）。\n\n' +
+    '【書き起こし】\n' + text;
+
+  let formatted;
+  try {
+    formatted = callGemini({
+      contents: [{ role: 'user', parts: [{ text: prompt }] }],
+      generationConfig: { temperature: 0.3 }
+    }).trim();
+  } catch (err) {
+    return { ok: false, error: '整形に失敗しました: ' + err.message };
+  }
+
+  if (!formatted) return { ok: false, error: '整形結果が空でした' };
+  if (formatted.length > 200) formatted = formatted.slice(0, 200);
+
+  return { ok: true, text: formatted };
 }
