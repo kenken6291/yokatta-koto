@@ -131,6 +131,19 @@
   .empty{text-align:center; color:var(--sub); font-size:13px; padding:30px 10px;}
   .hidden{display:none !important;}
 
+  .voice-row{margin-top:8px;}
+  button.voice-btn{
+    display:inline-flex; align-items:center; gap:5px;
+    background:transparent; color:var(--leaf-dark); border:1px solid var(--leaf);
+    border-radius:20px; padding:6px 14px; font-size:12.5px; font-weight:600; cursor:pointer;
+  }
+  button.voice-btn:hover{background:var(--leaf-pale);}
+  button.voice-btn.recording{background:var(--danger); color:#fff; border-color:var(--danger);}
+  .voice-preview{
+    margin-top:6px; font-size:12px; color:var(--sub); background:#fbfaf6;
+    border:1px solid var(--line); border-radius:8px; padding:8px 10px; white-space:pre-wrap;
+  }
+
   .userbar{display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; font-size:12.5px; color:var(--sub);}
   .userbar strong{color:var(--ink);}
   .userbar .actions{display:flex; gap:10px;}
@@ -302,6 +315,10 @@
           <span class="charcount"><span id="cc1">0</span> / 200</span>
         </div>
         <textarea id="item1" maxlength="200"></textarea>
+        <div class="voice-row">
+          <button type="button" class="voice-btn" id="voiceBtn1">🎤 音声入力</button>
+        </div>
+        <div class="voice-preview hidden" id="voicePrev1"></div>
         <label class="share-toggle" data-idx="1">
           <input type="checkbox" id="pub1"> 他の会員に公開する
         </label>
@@ -313,6 +330,10 @@
           <span class="charcount"><span id="cc2">0</span> / 200</span>
         </div>
         <textarea id="item2" maxlength="200"></textarea>
+        <div class="voice-row">
+          <button type="button" class="voice-btn" id="voiceBtn2">🎤 音声入力</button>
+        </div>
+        <div class="voice-preview hidden" id="voicePrev2"></div>
         <label class="share-toggle" data-idx="2">
           <input type="checkbox" id="pub2"> 他の会員に公開する
         </label>
@@ -324,6 +345,10 @@
           <span class="charcount"><span id="cc3">0</span> / 200</span>
         </div>
         <textarea id="item3" maxlength="200"></textarea>
+        <div class="voice-row">
+          <button type="button" class="voice-btn" id="voiceBtn3">🎤 音声入力</button>
+        </div>
+        <div class="voice-preview hidden" id="voicePrev3"></div>
         <label class="share-toggle" data-idx="3">
           <input type="checkbox" id="pub3"> 他の会員に公開する
         </label>
@@ -355,7 +380,7 @@
 /* =========================================================
    ここを自分のGAS「ウェブアプリURL」に置き換えてください
    ========================================================= */
-const API_URL = "https://script.google.com/macros/s/AKfycbwvYfwcOJLXMHeiI803_rWUsyVDgvJJWJViNn0_t7bEBxjZ-vE_YNz3UXlt_t8pa52H/exec";
+const API_URL = "https://script.google.com/macros/s/AKfycbyYdoczaiDgzhEGRxnLmOdLA-QiFyruOj2iI9F44pe4yM_R8IaGLgOKGFIdEMPhhHvy8g/exec";
 
 let TOKEN = localStorage.getItem('yk_token') || null;
 let MY_NICKNAME = '';
@@ -525,6 +550,84 @@ document.querySelectorAll('.share-toggle input').forEach(cb=>{
   cb.addEventListener('change', ()=>{ cb.closest('.share-toggle').classList.toggle('on', cb.checked); });
 });
 
+/* ---------- 音声入力(共通) ---------- */
+let recognition = null;
+let voiceActive = false;
+
+function getSpeechRecognitionCtor(){
+  return window.SpeechRecognition || window.webkitSpeechRecognition || null;
+}
+
+function toggleVoiceInput(textareaEl, btnEl, previewEl){
+  if (voiceActive){
+    if (recognition) recognition.stop();
+    return;
+  }
+  const Ctor = getSpeechRecognitionCtor();
+  if (!Ctor){
+    alert('お使いのブラウザは音声入力に対応していません。文章を直接入力してください。');
+    return;
+  }
+  recognition = new Ctor();
+  recognition.lang = 'ja-JP';
+  recognition.interimResults = true;
+  recognition.continuous = false;
+
+  let liveText = '';
+
+  recognition.onstart = ()=>{
+    voiceActive = true;
+    btnEl.classList.add('recording');
+    btnEl.textContent = '🛑 停止（話し終えたらタップ）';
+    previewEl.classList.remove('hidden');
+    previewEl.textContent = '聞き取り中...';
+  };
+  recognition.onresult = (ev)=>{
+    let text = '';
+    for (let i = ev.resultIndex; i < ev.results.length; i++){ text += ev.results[i][0].transcript; }
+    liveText = text;
+    previewEl.textContent = text;
+  };
+  recognition.onerror = ()=>{
+    stopVoiceUI(btnEl, previewEl);
+    voiceActive = false;
+  };
+  recognition.onend = async ()=>{
+    stopVoiceUI(btnEl, previewEl);
+    voiceActive = false;
+    const spoken = liveText.trim();
+    if (spoken) await formatAndFillVoiceText(spoken, textareaEl, previewEl);
+    else previewEl.classList.add('hidden');
+  };
+  recognition.start();
+}
+
+function stopVoiceUI(btnEl, previewEl){
+  btnEl.classList.remove('recording');
+  btnEl.textContent = '🎤 音声入力';
+}
+
+async function formatAndFillVoiceText(text, textareaEl, previewEl){
+  previewEl.classList.remove('hidden');
+  previewEl.textContent = '✨ AIが文章を整えています...';
+  try {
+    const r = await api('formatVoiceText', { text });
+    if (r.ok && r.text){
+      textareaEl.value = r.text;
+    } else {
+      textareaEl.value = text; // 整形失敗時は書き起こしそのままを入れる
+    }
+  } catch (err) {
+    textareaEl.value = text;
+  }
+  textareaEl.dispatchEvent(new Event('input'));
+  previewEl.classList.add('hidden');
+}
+
+[1,2,3].forEach(i=>{
+  $('voiceBtn'+i).addEventListener('click', ()=> toggleVoiceInput($('item'+i), $('voiceBtn'+i), $('voicePrev'+i)));
+});
+
 $('btnSaveEntry').addEventListener('click', async ()=>{
   const msg = $('composeMsg');
   const items = [1,2,3].map(i=>({
@@ -637,6 +740,8 @@ function renderEntryEditForm(div, e){
       '<div class="edit-item">' +
         '<label class="field-label">'+(idx+1)+'つ目の良かったこと</label>' +
         '<textarea class="edit-text" data-idx="'+idx+'" maxlength="200">'+escapeHtml(it.text)+'</textarea>' +
+        '<div class="voice-row"><button type="button" class="voice-btn">🎤 音声入力</button></div>' +
+        '<div class="voice-preview hidden"></div>' +
         '<label class="share-toggle'+(it.isPublic?' on':'')+'"><input type="checkbox" class="edit-pub" data-idx="'+idx+'" '+(it.isPublic?'checked':'')+'> 他の会員に公開する</label>' +
       '</div>'
     ).join('') +
@@ -649,6 +754,12 @@ function renderEntryEditForm(div, e){
 
   div.querySelectorAll('.share-toggle input').forEach(cb=>{
     cb.addEventListener('change', ()=> cb.closest('.share-toggle').classList.toggle('on', cb.checked));
+  });
+  div.querySelectorAll('.edit-item').forEach(block=>{
+    const ta = block.querySelector('.edit-text');
+    const btn = block.querySelector('.voice-btn');
+    const prev = block.querySelector('.voice-preview');
+    btn.addEventListener('click', ()=> toggleVoiceInput(ta, btn, prev));
   });
   div.querySelector('.edit-cancel').addEventListener('click', ()=> renderEntryView(div, e));
   div.querySelector('.edit-save').addEventListener('click', async ()=>{
